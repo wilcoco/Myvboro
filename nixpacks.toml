@@ -1,0 +1,22 @@
+# Railway build configuration.
+# DB (Postgres + PostGIS) is provisioned as a separate Railway plugin/service
+# and exposed to this app via DATABASE_URL. PostGIS extension is enabled
+# inside the database itself (see prisma/migrations/00000000000000_postgis/).
+
+providers = ["node"]
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "openssl"]
+
+[phases.install]
+cmds = ["npm ci --include=dev"]
+
+[phases.build]
+cmds = ["npx prisma generate", "npm run build"]
+
+[start]
+cmd = "npx prisma migrate deploy && npm run start"
+
+[variables]
+NODE_ENV = "production"
+NEXT_TELEMETRY_DISABLED = "1"

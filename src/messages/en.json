@@ -1,0 +1,34 @@
+{
+  "Brand": {
+    "name": "myvboro",
+    "tagline": "Trust-based local knowledge, grown by people you can believe."
+  },
+  "Nav": {
+    "map": "Map",
+    "add": "Add",
+    "profile": "Profile",
+    "signin": "Sign in",
+    "signout": "Sign out"
+  },
+  "Landing": {
+    "title": "A neighborhood map you can trust.",
+    "subtitle": "Places appear from real visits, real photos, real people — not ads.",
+    "openMap": "Open the map"
+  },
+  "Map": {
+    "title": "Map",
+    "locateMe": "My location",
+    "locating": "Locating…",
+    "permissionDenied": "Location permission denied",
+    "loading": "Loading map…"
+  },
+  "Auth": {
+    "signInTitle": "Sign in to myvboro",
+    "withGoogle": "Continue with Google",
+    "or": "or",
+    "emailPlaceholder": "you@example.com",
+    "sendMagicLink": "Send magic link",
+    "checkEmail": "Check your inbox",
+    "checkEmailBody": "We sent a sign-in link to your email."
+  }
+}

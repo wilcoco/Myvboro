@@ -1,0 +1,248 @@
+// myvboro — Prisma schema
+//
+// PostGIS-backed geography columns are added via a raw SQL migration
+// (prisma/migrations/00000000000000_postgis/migration.sql). Prisma's
+// own migration logic does not understand `geography(POINT, 4326)`,
+// so we declare those columns as `Unsupported(...)` and operate on
+// them with raw queries / PostGIS functions.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [postgis]
+}
+
+// ---------- Auth.js ----------
+
+model User {
+  id                String        @id @default(cuid())
+  name              String?
+  email             String?       @unique
+  emailVerified     DateTime?
+  image             String?
+
+  // Trust & authority
+  authorityScore    Float         @default(0)
+  breadthScore      Float         @default(0)
+  distributionScore Float         @default(0)
+  consistencyScore  Float         @default(0)
+  hitRate           Float         @default(0)
+
+  // Privacy
+  profileVisibility ProfileVisibility @default(PUBLIC)
+
+  accounts          Account[]
+  sessions          Session[]
+  visits            Visit[]
+  endorsementsGiven Endorsement[] @relation("endorsementsGiven")
+  endorsementsGot   Endorsement[] @relation("endorsementsGot")
+  authoredMerges    PlaceMerge[]  @relation("placeMergeAuthor")
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+enum ProfileVisibility {
+  PUBLIC
+  FOLLOWERS
+  PRIVATE
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------- Domain ----------
+
+model Place {
+  id                  String   @id @default(cuid())
+
+  // canonical info
+  primaryName         String
+  aliases             Json     @default("[]") // [{name, count, lang}]
+  category            String?  // free-form for MVP (cafe, restaurant, ...)
+
+  // centroid (numeric duplicate of `location` for fast reads / sorting)
+  centroidLat         Float
+  centroidLng         Float
+  // PostGIS column added in the postgis migration:
+  //   location  geography(POINT, 4326)
+  location            Unsupported("geography(POINT, 4326)")?
+
+  // emergent uncertainty / confidence
+  radiusMeters        Float    @default(80)
+  confidence          Float    @default(0.5)
+
+  // photo embedding (avg of storefront CLIP embeddings)
+  storefrontEmbedding Json?
+
+  // aggregates
+  visitCount          Int      @default(0)
+  authoritySum        Float    @default(0)
+  endorsementCount    Int      @default(0)
+
+  visits              Visit[]
+  endorsements        Endorsement[]
+  mergesFrom          PlaceMerge[]  @relation("placeMergeFrom")
+  mergesTo            PlaceMerge[]  @relation("placeMergeTo")
+
+  // soft-merge: redirect to canonical place if this got merged away
+  mergedIntoId        String?
+  mergedInto          Place?   @relation("placeMergeRedirect", fields: [mergedIntoId], references: [id])
+  mergedAliases       Place[]  @relation("placeMergeRedirect")
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([centroidLat, centroidLng])
+}
+
+model Visit {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  placeId       String?
+  place         Place?   @relation(fields: [placeId], references: [id])
+
+  rawName       String
+
+  lat           Float
+  lng           Float
+  location      Unsupported("geography(POINT, 4326)")?
+  gpsAccuracy   Float?
+  dwellTimeSec  Int?
+
+  tier          Int      // 0..6 (see kickoff §3-4)
+  weight        Float
+
+  comment       String?  @db.Text
+  rating        Int?     // 1..5
+
+  photos        Photo[]
+  endorsements  Endorsement[]
+
+  visitedAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([placeId])
+  @@index([visitedAt])
+}
+
+enum PhotoKind {
+  STOREFRONT
+  MENU
+  FOOD
+  INTERIOR
+  RECEIPT
+}
+
+model Photo {
+  id              String    @id @default(cuid())
+  visitId         String
+  visit           Visit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  kind            PhotoKind
+  url             String
+  thumbnailUrl    String?
+
+  exifTime        DateTime?
+  exifLat         Float?
+  exifLng         Float?
+
+  perceptualHash  String?
+  clipEmbedding   Json?
+
+  takenInApp      Boolean   @default(false)
+
+  createdAt       DateTime  @default(now())
+
+  @@index([visitId])
+  @@index([kind])
+  @@index([perceptualHash])
+}
+
+// "줄서기" — A endorses, B queues up after seeing A, B visits, B rates.
+model Endorsement {
+  id            String    @id @default(cuid())
+
+  fromUserId    String
+  fromUser      User      @relation("endorsementsGiven", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId      String
+  toUser        User      @relation("endorsementsGot",   fields: [toUserId],   references: [id], onDelete: Cascade)
+
+  placeId       String
+  place         Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
+
+  visitId       String?
+  visit         Visit?    @relation(fields: [visitId], references: [id])
+
+  satisfaction  Int?      // null until visited, 1..5 once rated
+
+  visitedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([placeId])
+  @@index([fromUserId])
+  @@index([toUserId])
+}
+
+model PlaceMerge {
+  id            String   @id @default(cuid())
+
+  fromPlaceId   String
+  fromPlace     Place    @relation("placeMergeFrom", fields: [fromPlaceId], references: [id])
+  toPlaceId     String
+  toPlace       Place    @relation("placeMergeTo",   fields: [toPlaceId],   references: [id])
+
+  mergedByAi    Boolean  @default(false)
+  mergedByUserId String?
+  mergedByUser  User?    @relation("placeMergeAuthor", fields: [mergedByUserId], references: [id])
+
+  confidence    Float
+  reversible    Boolean  @default(true)
+  reversedAt    DateTime?
+
+  createdAt     DateTime @default(now())
+
+  @@index([fromPlaceId])
+  @@index([toPlaceId])
+}
