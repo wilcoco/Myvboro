@@ -13,7 +13,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const me = await getCurrentUser();
   return (
     <html lang="ko">
-      <body className="flex min-h-screen flex-col bg-bg text-text">
+      <body className="flex h-[100dvh] flex-col bg-bg text-text">
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <Link href="/" className="font-semibold tracking-tight">
             myvboro
@@ -35,7 +35,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             )}
           </nav>
         </header>
-        <main className="flex-1">{children}</main>
+        <main className="min-h-0 flex-1 overflow-auto">{children}</main>
       </body>
     </html>
   );

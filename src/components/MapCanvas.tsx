@@ -41,7 +41,15 @@ export default function MapCanvas() {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
     map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
 
+    // Belt-and-suspenders: if the container resized after init (common in
+    // flex layouts), force MapLibre to recompute. Cheap to call.
+    const ro = new ResizeObserver(() => map.resize());
+    ro.observe(wrapperRef.current);
+
     map.on("load", () => {
+      // Trigger one more resize after the style finishes loading; some
+      // layouts only get their final size by then.
+      map.resize();
       map.addSource("places", { type: "geojson", data: emptyFC() });
       // Outer "uncertainty" circle: larger when radius is large (low confidence).
       map.addLayer({
@@ -105,6 +113,7 @@ export default function MapCanvas() {
     );
 
     return () => {
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
     };
