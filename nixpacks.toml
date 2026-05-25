@@ -20,11 +20,9 @@ cmds = ["npm install --no-audit --no-fund --include=dev"]
 cmds = ["npx prisma generate", "npm run build"]
 
 [start]
-# Run migrations against the live DB on every deploy, then start the server.
-# Using `next start` (not standalone) because we set output:"standalone" only
-# to keep the build slim; for runtime we still go through the npm script so
-# PORT and other env vars are honored.
-cmd = "npx prisma migrate deploy && npm run start"
+# Run migrations (with retry loop for Railway IPv6 cold-start timing),
+# then start the server. See scripts/start.sh.
+cmd = "sh scripts/start.sh"
 
 [variables]
 NODE_ENV = "production"
