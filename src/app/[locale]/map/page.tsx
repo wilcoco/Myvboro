@@ -24,10 +24,10 @@ export default async function MapPage({
         </Link>
         <h1 className="text-sm text-muted-foreground">{t("Map.title")}</h1>
         <Link
-          href={session?.user ? "/add" : "/signin"}
+          href={session?.user ? "/profile" : "/signin"}
           className="text-sm hover:underline"
         >
-          {session?.user ? t("Nav.add") : t("Nav.signin")}
+          {session?.user ? t("Nav.profile") : t("Nav.signin")}
         </Link>
       </header>
       <div className="flex-1 relative">
@@ -48,6 +48,7 @@ export default async function MapPage({
               loginToQueue: t("Sheet.loginToQueue"),
               noVisits: t("Sheet.noVisits"),
               close: t("Sheet.close"),
+              suspected: t("Sheet.suspected"),
             },
           }}
         />

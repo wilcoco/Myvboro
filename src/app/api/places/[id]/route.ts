@@ -17,7 +17,13 @@ export async function GET(
         include: {
           photos: { select: { id: true, kind: true, url: true, thumbnailUrl: true } },
           user: {
-            select: { id: true, name: true, image: true, authorityScore: true },
+            select: {
+              id: true,
+              name: true,
+              image: true,
+              authorityScore: true,
+              suspicionScore: true,
+            },
           },
         },
       },

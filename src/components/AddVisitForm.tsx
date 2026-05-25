@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, ImagePlus, Loader2, MapPin, X } from "lucide-react";
 import { useRouter } from "@/i18n/routing";
+import { computeDhash } from "@/lib/phash-client";
 
 type Labels = {
   locating: string;
@@ -45,6 +46,7 @@ type PendingPhoto = {
   file: File;
   previewUrl: string;
   takenInApp: boolean;
+  perceptualHash: string | null;
 };
 
 type NearbyPlace = {
@@ -139,11 +141,24 @@ export default function AddVisitForm({ labels }: { labels: Labels }) {
       if (!file) return;
       const compressed = await compressImage(file);
       const previewUrl = URL.createObjectURL(compressed);
+      // Compute pHash on the original (pre-compression) for stability.
+      const perceptualHash = await computeDhash(file);
       setPhotos((prev) => [
         ...prev.filter((p) => p.kind !== kind),
-        { kind, file: compressed, previewUrl, takenInApp },
+        { kind, file: compressed, previewUrl, takenInApp, perceptualHash },
       ]);
       e.target.value = "";
+
+      // For STOREFRONT, refresh nearby candidates with the hash so we
+      // catch same-storefront matches outside the 50m GPS radius.
+      if (kind === "STOREFRONT" && perceptualHash && coords) {
+        fetch(
+          `/api/places/nearby?lat=${coords.latitude}&lng=${coords.longitude}&radius=50&storefrontHash=${perceptualHash}`,
+        )
+          .then((r) => r.json())
+          .then((data) => setNearby(data.places ?? []))
+          .catch(() => {});
+      }
     };
   }
 
@@ -190,6 +205,7 @@ export default function AddVisitForm({ labels }: { labels: Labels }) {
             exifLat: coords.latitude,
             exifLng: coords.longitude,
             exifTime: new Date(p.file.lastModified).toISOString(),
+            perceptualHash: p.perceptualHash ?? undefined,
           };
         }),
       );
@@ -216,8 +232,22 @@ export default function AddVisitForm({ labels }: { labels: Labels }) {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "save failed");
-      const { placeId, pendingEndorsements: pe } =
-        (await res.json()) as { placeId: string; pendingEndorsements: PendingEndorsement[] };
+      const { visit, placeId, pendingEndorsements: pe } = (await res.json()) as {
+        visit: { id: string };
+        placeId: string;
+        pendingEndorsements: PendingEndorsement[];
+      };
+
+      // Fire-and-forget tier-4 AI verification when both menu & food
+      // photos are present. Server upgrades visit.tier silently if it
+      // passes — user sees the new tier next time they view the place.
+      const hasMenu = uploaded.some((p) => p.kind === "MENU");
+      const hasFood = uploaded.some((p) => p.kind === "FOOD");
+      if (hasMenu && hasFood) {
+        void fetch(`/api/visits/${visit.id}/verify`, { method: "POST" }).catch(
+          () => {},
+        );
+      }
 
       setSavedPlaceId(placeId);
       if (pe && pe.length > 0) {

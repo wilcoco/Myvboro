@@ -33,6 +33,7 @@ model User {
   distributionScore Float         @default(0)
   consistencyScore  Float         @default(0)
   hitRate           Float         @default(0)
+  suspicionScore    Float         @default(0)
 
   // Privacy
   profileVisibility ProfileVisibility @default(PUBLIC)

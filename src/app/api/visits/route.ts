@@ -5,6 +5,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { computeTier } from "@/lib/scoring";
 import { recomputePlaceAggregates } from "@/lib/places";
+import { recomputeUserScores } from "@/lib/userScores";
+import { PHASH_HEX_RE } from "@/lib/phash";
 
 const PhotoSchema = z.object({
   kind: z.enum(["STOREFRONT", "MENU", "FOOD", "INTERIOR", "RECEIPT"]),
@@ -13,6 +15,7 @@ const PhotoSchema = z.object({
   exifTime: z.string().datetime().optional(),
   exifLat: z.number().optional(),
   exifLng: z.number().optional(),
+  perceptualHash: z.string().regex(PHASH_HEX_RE).optional(),
 });
 
 const BodySchema = z.object({
@@ -107,6 +110,7 @@ export async function POST(req: NextRequest) {
           exifTime: p.exifTime ? new Date(p.exifTime) : null,
           exifLat: p.exifLat ?? null,
           exifLng: p.exifLng ?? null,
+          perceptualHash: p.perceptualHash ?? null,
         })),
       },
     },
@@ -114,6 +118,7 @@ export async function POST(req: NextRequest) {
   });
 
   await recomputePlaceAggregates(placeId);
+  await recomputeUserScores(session.user.id);
 
   // If this user had pending endorsements (queue-ups) for this place,
   // attach this visit to them and return them so the client can prompt

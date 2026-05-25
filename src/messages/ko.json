@@ -30,7 +30,26 @@
     "queued": "줄섰음",
     "loginToQueue": "로그인하면 줄설 수 있어요",
     "noVisits": "아직 방문이 없어요 — 첫 사람이 되어보세요.",
-    "close": "닫기"
+    "close": "닫기",
+    "suspected": "의심"
+  },
+  "Profile": {
+    "backToMap": "지도",
+    "signOut": "로그아웃",
+    "authority": "권위",
+    "breadth": "넓이",
+    "distribution": "분포",
+    "hitRate": "비평율",
+    "suspicionTitle": "광고 어카운트 패턴이 감지됐어요.",
+    "suspicionBody": "방문이 몇 곳에 몰려있거나, 한 카테고리만 다니거나, 평점이 다 4~5점이에요. 다양한 곳을 다니고 별로인 곳도 정직하게 평가해주세요 — 그러면 권위가 회복됩니다.",
+    "territoryTitle": "내 영토",
+    "pendingTitle": "줄서서 다녀온 곳을 평가해주세요",
+    "pendingBody": "다른 분의 추천을 보고 줄섰던 방문들이에요. 정직한 평가가 그분의 권위를 움직입니다.",
+    "ratingSubmit": "보내기",
+    "ratingSubmitting": "저장 중…",
+    "visitsTitle": "최근 방문",
+    "noVisits": "아직 방문을 등록하지 않았어요.",
+    "addFirst": "첫 방문 등록하기."
   },
   "Add": {
     "title": "방문 등록",

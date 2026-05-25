@@ -30,7 +30,26 @@
     "queued": "Queued",
     "loginToQueue": "Sign in to queue up",
     "noVisits": "No visits yet — be the first.",
-    "close": "Close"
+    "close": "Close",
+    "suspected": "Suspect"
+  },
+  "Profile": {
+    "backToMap": "Map",
+    "signOut": "Sign out",
+    "authority": "Authority",
+    "breadth": "Breadth",
+    "distribution": "Distribution",
+    "hitRate": "Critic %",
+    "suspicionTitle": "This account looks ad-like.",
+    "suspicionBody": "Your visits cluster in a few spots, share one category, or only give 4-5 stars. Visit a wider variety of places — including ones you don't love — and your influence will recover.",
+    "territoryTitle": "Your territory",
+    "pendingTitle": "Rate the recommendations you queued",
+    "pendingBody": "You queued these from someone else's recommendation. Be honest — your rating moves their authority up or down.",
+    "ratingSubmit": "Submit",
+    "ratingSubmitting": "Saving…",
+    "visitsTitle": "Recent visits",
+    "noVisits": "You haven't logged any visits yet.",
+    "addFirst": "Add your first."
   },
   "Add": {
     "title": "Add a visit",

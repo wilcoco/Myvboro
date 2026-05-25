@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Loader2, Plus, Star, X } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Star, X } from "lucide-react";
 
 type Visit = {
   id: string;
@@ -12,7 +12,13 @@ type Visit = {
   weight: number;
   tier: number;
   visitedAt: string;
-  user: { id: string; name: string | null; image: string | null; authorityScore: number };
+  user: {
+    id: string;
+    name: string | null;
+    image: string | null;
+    authorityScore: number;
+    suspicionScore: number;
+  };
   photos: { id: string; kind: string; url: string }[];
 };
 
@@ -37,6 +43,7 @@ type Labels = {
   loginToQueue: string;
   noVisits: string;
   close: string;
+  suspected: string;
 };
 
 export default function PlaceDetailSheet({
@@ -142,8 +149,17 @@ export default function PlaceDetailSheet({
                       />
                     )}
                     <div className="min-w-0">
-                      <div className="text-sm font-medium truncate">
+                      <div className="text-sm font-medium truncate flex items-center gap-1.5">
                         {v.user.name ?? "—"}
+                        {v.user.suspicionScore > 0.5 && (
+                          <span
+                            title={labels.suspected}
+                            className="inline-flex items-center gap-0.5 text-[10px] font-medium uppercase rounded-sm bg-destructive/10 text-destructive px-1.5 py-0.5"
+                          >
+                            <AlertTriangle className="h-3 w-3" />
+                            {labels.suspected}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-muted-foreground">
                         T{v.tier} · w{v.weight.toFixed(0)} ·{" "}

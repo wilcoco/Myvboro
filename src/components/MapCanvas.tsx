@@ -7,6 +7,7 @@ import { Locate, Plus } from "lucide-react";
 
 import { Link } from "@/i18n/routing";
 import PlaceDetailSheet from "@/components/PlaceDetailSheet";
+import { buildMapStyle } from "@/lib/mapStyle";
 
 type Labels = {
   locateMe: string;
@@ -22,6 +23,7 @@ type Labels = {
     loginToQueue: string;
     noVisits: string;
     close: string;
+    suspected: string;
   };
 };
 
@@ -32,43 +34,6 @@ const DEFAULT_ZOOM = 13;
 const PLACES_SOURCE = "places";
 const PLACES_FILL_LAYER = "places-fill";
 const PLACES_STROKE_LAYER = "places-stroke";
-
-function buildStyle(mapboxToken: string): maplibregl.StyleSpecification {
-  if (mapboxToken) {
-    return {
-      version: 8,
-      sources: {
-        mapbox: {
-          type: "raster",
-          tiles: [
-            `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`,
-          ],
-          tileSize: 512,
-          attribution:
-            '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="https://www.openstreetmap.org/about/">OpenStreetMap</a>',
-        },
-      },
-      layers: [{ id: "mapbox", type: "raster", source: "mapbox" }],
-    };
-  }
-
-  return {
-    version: 8,
-    sources: {
-      osm: {
-        type: "raster",
-        tiles: [
-          "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-          "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-          "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        ],
-        tileSize: 256,
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      },
-    },
-    layers: [{ id: "osm", type: "raster", source: "osm" }],
-  };
-}
 
 type ApiPlace = {
   id: string;
@@ -123,7 +88,7 @@ export default function MapCanvas({
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: buildStyle(mapboxToken),
+      style: buildMapStyle(mapboxToken),
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
       attributionControl: { compact: true },

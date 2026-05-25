@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { hammingHex, PHASH_HEX_RE } from "@/lib/phash";
 
 export type NearbyCandidate = {
   id: string;
@@ -46,6 +47,83 @@ export async function findNearbyPlaces(opts: {
     ORDER BY "distanceMeters" ASC
     LIMIT ${limit}
   `;
+}
+
+// Same-storefront detection: a STOREFRONT photo whose dHash is within
+// HAMMING_MATCH of the candidate's hash is a strong signal that two
+// visits are at the *same* place even if their GPS drifts. We scan
+// a wider radius for hash matches than for raw GPS candidates.
+const HAMMING_MATCH = 12;
+
+export async function findCandidatePlaces(opts: {
+  lat: number;
+  lng: number;
+  radiusMeters?: number;
+  storefrontHash?: string | null;
+  hashRadiusMeters?: number;
+  limit?: number;
+}): Promise<NearbyCandidate[]> {
+  const gps = await findNearbyPlaces({
+    lat: opts.lat,
+    lng: opts.lng,
+    radiusMeters: opts.radiusMeters ?? 50,
+    limit: opts.limit ?? 10,
+  });
+
+  if (!opts.storefrontHash || !PHASH_HEX_RE.test(opts.storefrontHash)) {
+    return gps;
+  }
+
+  const hashRadius = opts.hashRadiusMeters ?? 300;
+  type Row = { placeId: string | null; perceptualHash: string };
+  const rows = await prisma.$queryRaw<Row[]>`
+    SELECT v."placeId", p."perceptualHash"
+    FROM "Photo" p
+    JOIN "Visit" v ON v.id = p."visitId"
+    WHERE p.kind = 'STOREFRONT'
+      AND p."perceptualHash" IS NOT NULL
+      AND v."placeId" IS NOT NULL
+      AND v."location" IS NOT NULL
+      AND ST_DWithin(
+        v."location",
+        ST_SetSRID(ST_MakePoint(${opts.lng}, ${opts.lat}), 4326)::geography,
+        ${hashRadius}
+      )
+    LIMIT 500
+  `;
+
+  const seen = new Set(gps.map((c) => c.id));
+  const matched = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.placeId || seen.has(row.placeId)) continue;
+    const h = hammingHex(opts.storefrontHash, row.perceptualHash);
+    if (h > HAMMING_MATCH) continue;
+    const prev = matched.get(row.placeId);
+    if (prev == null || h < prev) matched.set(row.placeId, h);
+  }
+  if (matched.size === 0) return gps;
+
+  const extraIds = [...matched.keys()];
+  const extra = await prisma.$queryRaw<NearbyCandidate[]>`
+    SELECT
+      "id",
+      "primaryName",
+      "category",
+      "centroidLat",
+      "centroidLng",
+      "radiusMeters",
+      "confidence",
+      "visitCount",
+      ST_Distance(
+        "location",
+        ST_SetSRID(ST_MakePoint(${opts.lng}, ${opts.lat}), 4326)::geography
+      ) AS "distanceMeters"
+    FROM "Place"
+    WHERE "id" = ANY(${extraIds}::text[])
+      AND "mergedIntoId" IS NULL
+  `;
+
+  return [...gps, ...extra].slice(0, opts.limit ?? 10);
 }
 
 export type PlaceInBbox = {
