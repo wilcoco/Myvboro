@@ -26,6 +26,10 @@ export default function SignInForm() {
       const json = await res.json();
       if (!json.ok) {
         setError(json.error || "전송 실패");
+      } else if (json.autoSignedIn) {
+        // Dev mock provider — server skipped OTP and created the session.
+        router.push("/map");
+        router.refresh();
       } else {
         setStage("code");
       }
@@ -60,7 +64,7 @@ export default function SignInForm() {
     <div className="w-full max-w-sm space-y-4">
       <h1 className="text-2xl font-semibold">로그인</h1>
       <p className="text-sm text-muted">
-        휴대폰 번호로 가입·로그인합니다. SMS 인증 외 별도 절차 없음.
+        휴대폰 번호로 가입·로그인합니다. (개발 모드에서는 인증번호 단계가 생략됩니다.)
       </p>
 
       {stage === "phone" && (

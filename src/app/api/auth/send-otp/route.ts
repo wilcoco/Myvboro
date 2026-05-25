@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { issueOtp } from "@/lib/otp";
 import { toE164 } from "@/lib/utils";
+import { env } from "@/lib/env";
+import { prisma } from "@/lib/prisma";
+import { createSession } from "@/lib/session";
+import { grantSignupBonus } from "@/lib/economy";
 
 const Body = z.object({ phoneNumber: z.string().min(7).max(20) });
 
@@ -13,6 +17,26 @@ export async function POST(req: Request) {
   const phone = toE164(parsed.data.phoneNumber);
   if (!phone) {
     return Response.json({ ok: false, error: "INVALID_PHONE" }, { status: 400 });
+  }
+
+  // Dev shortcut: when no real SMS provider is wired, skip OTP entirely
+  // and create the session right away. The whole `mock` provider exists
+  // for this — don't keep users typing a code that nobody actually sends.
+  if (env.smsProvider === "mock") {
+    const existing = await prisma.user.findUnique({ where: { phoneNumber: phone } });
+    let userId: string;
+    if (existing) {
+      userId = existing.id;
+    } else {
+      const created = await prisma.user.create({
+        data: { phoneNumber: phone },
+        select: { id: true },
+      });
+      userId = created.id;
+      await grantSignupBonus(userId);
+    }
+    await createSession(userId);
+    return Response.json({ ok: true, autoSignedIn: true, newUser: !existing });
   }
 
   const result = await issueOtp(phone);
