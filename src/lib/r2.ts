@@ -1,43 +1,41 @@
-import {
-  S3Client,
-  PutObjectCommand,
-  type PutObjectCommandInput,
-} from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { env, r2Enabled } from "@/lib/env";
+import { randomBytes } from "crypto";
 
-const accountId = process.env.R2_ACCOUNT_ID ?? "";
-const accessKeyId = process.env.R2_ACCESS_KEY_ID ?? "";
-const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY ?? "";
-
-export const R2_BUCKET = process.env.R2_BUCKET ?? "myvboro-photos";
-export const R2_PUBLIC_URL =
-  process.env.R2_PUBLIC_URL?.replace(/\/$/, "") ?? "";
-
-export const r2 = new S3Client({
-  region: "auto",
-  endpoint: accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined,
-  credentials:
-    accessKeyId && secretAccessKey
-      ? { accessKeyId, secretAccessKey }
-      : undefined,
-});
-
-export function isR2Configured() {
-  return Boolean(accountId && accessKeyId && secretAccessKey && R2_PUBLIC_URL);
+let _client: S3Client | null = null;
+function client(): S3Client {
+  if (_client) return _client;
+  _client = new S3Client({
+    region: "auto",
+    endpoint: `https://${env.r2.accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: env.r2.accessKeyId,
+      secretAccessKey: env.r2.secretAccessKey,
+    },
+  });
+  return _client;
 }
 
-export async function createUploadUrl(opts: {
-  key: string;
+export type PresignResult =
+  | { ok: true; uploadUrl: string; publicUrl: string; key: string }
+  | { ok: false; reason: "DISABLED" };
+
+export async function presignPhotoUpload(opts: {
   contentType: string;
-  expiresInSec?: number;
-}) {
-  const input: PutObjectCommandInput = {
-    Bucket: R2_BUCKET,
-    Key: opts.key,
+}): Promise<PresignResult> {
+  if (!r2Enabled) return { ok: false, reason: "DISABLED" };
+
+  const ext = opts.contentType.split("/")[1] || "jpg";
+  const key = `${new Date().toISOString().slice(0, 10)}/${randomBytes(12).toString("hex")}.${ext}`;
+  const cmd = new PutObjectCommand({
+    Bucket: env.r2.bucket,
+    Key: key,
     ContentType: opts.contentType,
-  };
-  const url = await getSignedUrl(r2, new PutObjectCommand(input), {
-    expiresIn: opts.expiresInSec ?? 60 * 5,
   });
-  return { url, publicUrl: `${R2_PUBLIC_URL}/${opts.key}` };
+  const uploadUrl = await getSignedUrl(client(), cmd, { expiresIn: 300 });
+  const publicUrl = env.r2.publicUrl
+    ? `${env.r2.publicUrl.replace(/\/$/, "")}/${key}`
+    : uploadUrl.split("?")[0];
+  return { ok: true, uploadUrl, publicUrl, key };
 }

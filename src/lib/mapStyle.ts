@@ -1,39 +1,33 @@
 import type { StyleSpecification } from "maplibre-gl";
+import { env } from "@/lib/env";
 
-// Shared MapLibre style builder so MapCanvas and ProfileVisitsMap stay
-// in sync on tiles + attribution. Mapbox raster when a token is set,
-// OSM raster otherwise.
-export function buildMapStyle(mapboxToken: string): StyleSpecification {
-  if (mapboxToken) {
+// Default tile source: Mapbox raster if a token is set, OSM otherwise.
+// Keep the style tiny — we render Place circles as a separate GeoJSON layer.
+export function defaultStyle(): StyleSpecification {
+  if (env.mapboxToken) {
     return {
       version: 8,
       sources: {
-        mapbox: {
+        raster: {
           type: "raster",
           tiles: [
-            `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${mapboxToken}`,
+            `https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}@2x?access_token=${env.mapboxToken}`,
           ],
-          tileSize: 512,
-          attribution:
-            '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="https://www.openstreetmap.org/about/">OpenStreetMap</a>',
+          tileSize: 256,
+          attribution: "© Mapbox © OpenStreetMap",
         },
       },
-      layers: [{ id: "mapbox", type: "raster", source: "mapbox" }],
+      layers: [{ id: "raster", type: "raster", source: "raster" }],
     };
   }
-
   return {
     version: 8,
     sources: {
       osm: {
         type: "raster",
-        tiles: [
-          "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-          "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-          "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        ],
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
         tileSize: 256,
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        attribution: "© OpenStreetMap contributors",
       },
     },
     layers: [{ id: "osm", type: "raster", source: "osm" }],

@@ -1,15 +1,13 @@
-// Renders only for paths outside of any [locale] route. Middleware
-// redirects "/" to "/en" (or "/ko") so this is essentially never hit,
-// but Next.js requires the file to exist at the app root.
+import Link from "next/link";
+
 export default function NotFound() {
   return (
-    <html lang="en">
-      <body>
-        <main style={{ padding: "4rem", fontFamily: "system-ui" }}>
-          <h1>404</h1>
-          <p>Page not found.</p>
-        </main>
-      </body>
-    </html>
+    <div className="mx-auto max-w-md px-6 py-24 text-center">
+      <div className="text-6xl">404</div>
+      <p className="mt-3 text-muted">없는 페이지입니다.</p>
+      <Link href="/" className="mt-6 inline-block rounded-md bg-accent px-4 py-2 text-black">
+        홈으로
+      </Link>
+    </div>
   );
 }

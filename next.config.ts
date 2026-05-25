@@ -1,21 +1,17 @@
 import type { NextConfig } from "next";
-import createNextIntlPlugin from "next-intl/plugin";
 
-const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
-
-const nextConfig: NextConfig = {
+const config: NextConfig = {
+  output: "standalone",
   reactStrictMode: true,
-  experimental: {
-    optimizePackageImports: ["lucide-react", "maplibre-gl"],
-  },
   images: {
     remotePatterns: [
-      { protocol: "https", hostname: "**.r2.cloudflarestorage.com" },
-      { protocol: "https", hostname: "**.r2.dev" },
-      { protocol: "https", hostname: "lh3.googleusercontent.com" },
-      { protocol: "https", hostname: "avatars.githubusercontent.com" },
+      { protocol: "https", hostname: "**" },
     ],
+  },
+  // Ensure Prisma binary is included in the standalone bundle on Railway.
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./node_modules/.prisma/client/**/*"],
   },
 };
 
-export default withNextIntl(nextConfig);
+export default config;

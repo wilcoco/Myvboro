@@ -1,10 +1,10 @@
 // myvboro — Prisma schema
 //
-// PostGIS-backed geography columns are added via a raw SQL migration
-// (prisma/migrations/00000000000000_postgis/migration.sql). Prisma's
-// own migration logic does not understand `geography(POINT, 4326)`,
-// so we declare those columns as `Unsupported(...)` and operate on
-// them with raw queries / PostGIS functions.
+// PostGIS geography columns are added via a raw SQL migration
+// (prisma/migrations/0_postgis/migration.sql). Prisma's migration engine
+// doesn't understand `geography(POINT, 4326)`, so those columns are
+// declared as `Unsupported(...)` and operated on with raw queries / PostGIS
+// functions in src/lib/places.ts.
 
 generator client {
   provider        = "prisma-client-js"
@@ -17,121 +17,154 @@ datasource db {
   extensions = [postgis]
 }
 
-// ---------- Auth.js ----------
+// ============================================================================
+// AUTH
+// ============================================================================
 
+// Phone-based auth: one User per verified phone number. No email, no OAuth
+// for MVP. Sybil resistance starts at the phone level (carriers prevent the
+// same number from owning multiple accounts) and is reinforced by device
+// fingerprints (model DeviceLink) and time-gated investment caps.
 model User {
-  id                String        @id @default(cuid())
-  name              String?
-  email             String?       @unique
-  emailVerified     DateTime?
-  image             String?
+  id              String   @id @default(cuid())
+  phoneNumber     String   @unique // E.164: +821012345678
+  displayName     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  // Trust & authority
-  authorityScore    Float         @default(0)
-  breadthScore      Float         @default(0)
-  distributionScore Float         @default(0)
-  consistencyScore  Float         @default(0)
-  hitRate           Float         @default(0)
-  suspicionScore    Float         @default(0)
+  // --- Points economy ---
+  // points: spendable balance. Granted on signup and daily, earned via
+  // dividends from follow-on investors, spent on creating places and
+  // investing in others.
+  points          Int      @default(0)
+  // Track the last day we credited the daily grant (YYYY-MM-DD in UTC).
+  // Cheaper to check than a separate ledger for the daily-credit case.
+  lastDailyGrant  String?
 
-  // Privacy
+  // --- Trust scores (recomputed lazily; see lib/scoring.ts) ---
+  authorityScore  Float    @default(0)
+  hitRate         Float    @default(0)   // fraction of ratings <= 3
+  suspicionScore  Float    @default(0)   // 0..1, sybil/shill flag
+
+  // --- Privacy ---
   profileVisibility ProfileVisibility @default(PUBLIC)
 
-  accounts          Account[]
-  sessions          Session[]
-  visits            Visit[]
-  endorsementsGiven Endorsement[] @relation("endorsementsGiven")
-  endorsementsGot   Endorsement[] @relation("endorsementsGot")
-  authoredMerges    PlaceMerge[]  @relation("placeMergeAuthor")
+  sessions        Session[]
+  visits          Visit[]
+  investments     Investment[]
+  dividends       Dividend[]   @relation("dividendRecipient")
+  deviceLinks     DeviceLink[]
+  placesCreated   Place[]      @relation("placeCreator")
 
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  @@index([createdAt])
 }
 
 enum ProfileVisibility {
   PUBLIC
-  FOLLOWERS
   PRIVATE
 }
 
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
-
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
+// Outstanding SMS OTPs. We hash the code (SHA-256) so a DB leak doesn't
+// hand out fresh logins. `attempts` is rate-limit fuel.
+model OtpCode {
   id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phoneNumber  String
+  codeHash     String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([phoneNumber, createdAt])
+  @@index([expiresAt])
 }
 
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
+// Server-issued opaque session tokens, set as an httpOnly cookie.
+// Storing tokens in the DB (instead of pure stateless JWT) lets us revoke
+// individual devices and observe simultaneous device counts per user.
+model Session {
+  id              String   @id @default(cuid())
+  token           String   @unique
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  userAgent       String?
+  deviceFingerprint String?
+  ip              String?
 
-  @@unique([identifier, token])
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([deviceFingerprint])
 }
 
-// ---------- Domain ----------
+// Bridge between users and a coarse device fingerprint (canvas + UA hash).
+// One fingerprint should map to ~1 user; many users on one fingerprint is a
+// strong sybil signal. See lib/sybil.ts.
+model DeviceLink {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceFingerprint String
+  firstSeenAt      DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
+
+  @@unique([userId, deviceFingerprint])
+  @@index([deviceFingerprint])
+}
+
+// ============================================================================
+// PLACES & EVIDENCE
+// ============================================================================
 
 model Place {
   id                  String   @id @default(cuid())
 
-  // canonical info
   primaryName         String
-  aliases             Json     @default("[]") // [{name, count, lang}]
-  category            String?  // free-form for MVP (cafe, restaurant, ...)
+  aliases             Json     @default("[]") // [{ name, count, lang }]
+  category            String?  // free-form for MVP
 
-  // centroid (numeric duplicate of `location` for fast reads / sorting)
+  // Centroid is the numeric duplicate of `location` for fast reads/sorting.
+  // `location` is added by the postgis migration as geography(POINT, 4326).
   centroidLat         Float
   centroidLng         Float
-  // PostGIS column added in the postgis migration:
-  //   location  geography(POINT, 4326)
   location            Unsupported("geography(POINT, 4326)")?
 
-  // emergent uncertainty / confidence
+  // Emergent uncertainty / confidence; updated by lib/scoring.recomputePlaceAggregates.
   radiusMeters        Float    @default(80)
   confidence          Float    @default(0.5)
 
-  // photo embedding (avg of storefront CLIP embeddings)
-  storefrontEmbedding Json?
-
-  // aggregates
+  // --- Aggregates ---
   visitCount          Int      @default(0)
   authoritySum        Float    @default(0)
-  endorsementCount    Int      @default(0)
 
-  visits              Visit[]
-  endorsements        Endorsement[]
-  mergesFrom          PlaceMerge[]  @relation("placeMergeFrom")
-  mergesTo            PlaceMerge[]  @relation("placeMergeTo")
+  // --- Investment pool (the game state) ---
+  totalInvestment     Int      @default(0)   // sum of all investments
+  investorCount       Int      @default(0)
+  // Rolling 7-day investment sum; recomputed when investments happen.
+  recentInvestSum     Int      @default(0)
+  recentInvestUpdatedAt DateTime @default(now())
 
-  // soft-merge: redirect to canonical place if this got merged away
+  // --- Creator (first investor) ---
+  createdById         String?
+  createdBy           User?    @relation("placeCreator", fields: [createdById], references: [id])
+
+  // Soft-merge: redirect to canonical place if this got merged away.
   mergedIntoId        String?
   mergedInto          Place?   @relation("placeMergeRedirect", fields: [mergedIntoId], references: [id])
   mergedAliases       Place[]  @relation("placeMergeRedirect")
+
+  visits              Visit[]
+  investments         Investment[]
+  photos              Photo[]
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   @@index([centroidLat, centroidLng])
+  @@index([totalInvestment])
+  @@index([mergedIntoId])
 }
 
 model Visit {
@@ -150,14 +183,15 @@ model Visit {
   gpsAccuracy   Float?
   dwellTimeSec  Int?
 
-  tier          Int      // 0..6 (see kickoff §3-4)
+  // Proof ladder tier (see lib/scoring.computeTier).
+  // 0 text · 1 GPS · 2 GPS+dwell · 3 in-app camera · 4 menu-match · 5 receipt OCR
+  tier          Int
   weight        Float
 
   comment       String?  @db.Text
   rating        Int?     // 1..5
 
   photos        Photo[]
-  endorsements  Endorsement[]
 
   visitedAt     DateTime
   createdAt     DateTime @default(now())
@@ -179,6 +213,10 @@ model Photo {
   id              String    @id @default(cuid())
   visitId         String
   visit           Visit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  // Photos hang off Visit, but for fast place-detail fetches we also
+  // denormalize the place pointer.
+  placeId         String?
+  place           Place?    @relation(fields: [placeId], references: [id])
 
   kind            PhotoKind
   url             String
@@ -189,60 +227,100 @@ model Photo {
   exifLng         Float?
 
   perceptualHash  String?
-  clipEmbedding   Json?
-
   takenInApp      Boolean   @default(false)
 
   createdAt       DateTime  @default(now())
 
   @@index([visitId])
+  @@index([placeId])
   @@index([kind])
   @@index([perceptualHash])
 }
 
-// "줄서기" — A endorses, B queues up after seeing A, B visits, B rates.
-model Endorsement {
-  id            String    @id @default(cuid())
+// ============================================================================
+// INVESTMENT GAME (VC-style seed dilution)
+// ============================================================================
+//
+// Mechanic: when User B invests `amount` in Place P, that `amount` is
+// distributed pro-rata to all PRIOR investors in P, by their share of the
+// pool *before* B's investment. B then holds `amount / newTotal` of the
+// new pool. Equity is implicit (= Investment.amount / Place.totalInvestment).
+//
+// Concrete example (from kickoff discussion):
+//   U1 invests 100 -> pool 100, U1 holds 100%
+//   U2 invests 200 -> U1 receives 200 dividend; pool 300; U1 1/3, U2 2/3
+//   U3 invests 300 -> U1 receives 100, U2 receives 200; pool 600; 1/6 / 2/6 / 3/6
+//
+// Guard rails (lib/invest.ts):
+//   - Lockup: investments cannot be created/withdrawn freely; the amount
+//     is "spent" from User.points and never returns (only dividends do).
+//   - Per-place cap (% of pool), per-day cap, new-account cap.
+//   - One-investment-per-user-per-place (subsequent puts are summed via
+//     additional Investment rows, but counted in `investorCount` once).
+//
+// Audit trail: every dividend payout writes a Dividend row. Together with
+// Investment rows this is the full ledger.
 
-  fromUserId    String
-  fromUser      User      @relation("endorsementsGiven", fields: [fromUserId], references: [id], onDelete: Cascade)
-  toUserId      String
-  toUser        User      @relation("endorsementsGot",   fields: [toUserId],   references: [id], onDelete: Cascade)
+model Investment {
+  id              String   @id @default(cuid())
 
-  placeId       String
-  place         Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  visitId       String?
-  visit         Visit?    @relation(fields: [visitId], references: [id])
+  placeId         String
+  place           Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
 
-  satisfaction  Int?      // null until visited, 1..5 once rated
+  amount          Int
 
-  visitedAt     DateTime?
-  createdAt     DateTime  @default(now())
+  // Pool size BEFORE this investment landed. Used in audits and to
+  // reconstruct dividend math; the live equity is computed from current
+  // Place.totalInvestment.
+  poolBeforeInvest Int
 
+  investedAt      DateTime @default(now())
+
+  // Lockup window: minimum age before this investment counts toward
+  // certain "graduated" rewards. We do NOT permit withdrawal in MVP, so
+  // this is informational for the UI.
+  lockedUntil     DateTime?
+
+  // Dividends *paid by* this investment (when later investors arrive,
+  // those dividends will be Dividend rows whose sourceInvestmentId points
+  // back at... no — those Dividend rows point at *this* investment as the
+  // RECEIVER when this investor is paid. The investments that *cause*
+  // payments to this one are linked via `causedDividends` below.
+  dividendsReceived Dividend[] @relation("dividendReceiver")
+  // Dividends caused (paid out) when THIS investment landed and triggered
+  // pro-rata payouts to prior investors.
+  causedDividends   Dividend[] @relation("dividendCause")
+
+  @@index([userId])
   @@index([placeId])
-  @@index([fromUserId])
-  @@index([toUserId])
+  @@index([investedAt])
 }
 
-model PlaceMerge {
-  id            String   @id @default(cuid())
+// Ledger row: a single payout to one prior investor caused by one new
+// investment. amount = causingInvestment.amount * (receiverInvestment.amount / pool_before_causing).
+//
+// We store both the "receiver investment" (the previously held stake that
+// earned this payout) and the "receiver user" so reports stay fast.
+model Dividend {
+  id                    String   @id @default(cuid())
 
-  fromPlaceId   String
-  fromPlace     Place    @relation("placeMergeFrom", fields: [fromPlaceId], references: [id])
-  toPlaceId     String
-  toPlace       Place    @relation("placeMergeTo",   fields: [toPlaceId],   references: [id])
+  causingInvestmentId   String
+  causingInvestment     Investment @relation("dividendCause", fields: [causingInvestmentId], references: [id], onDelete: Cascade)
 
-  mergedByAi    Boolean  @default(false)
-  mergedByUserId String?
-  mergedByUser  User?    @relation("placeMergeAuthor", fields: [mergedByUserId], references: [id])
+  receiverInvestmentId  String
+  receiverInvestment    Investment @relation("dividendReceiver", fields: [receiverInvestmentId], references: [id], onDelete: Cascade)
 
-  confidence    Float
-  reversible    Boolean  @default(true)
-  reversedAt    DateTime?
+  receiverUserId        String
+  receiverUser          User       @relation("dividendRecipient", fields: [receiverUserId], references: [id], onDelete: Cascade)
 
-  createdAt     DateTime @default(now())
+  amount                Int
 
-  @@index([fromPlaceId])
-  @@index([toPlaceId])
+  createdAt             DateTime @default(now())
+
+  @@index([causingInvestmentId])
+  @@index([receiverInvestmentId])
+  @@index([receiverUserId])
 }

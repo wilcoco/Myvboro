@@ -1,7 +1,7 @@
 # Railway build configuration.
-# DB (Postgres + PostGIS) is provisioned as a separate Railway plugin/service
-# and exposed to this app via DATABASE_URL. PostGIS extension is enabled
-# inside the database itself (see prisma/migrations/00000000000000_postgis/).
+# Postgres+PostGIS is provisioned as a separate Railway plugin and exposed
+# via DATABASE_URL. PostGIS extension is enabled inside the DB by the first
+# Prisma migration (prisma/migrations/0_postgis/).
 
 providers = ["node"]
 
@@ -9,12 +9,21 @@ providers = ["node"]
 nixPkgs = ["nodejs_20", "openssl"]
 
 [phases.install]
-cmds = ["npm ci --include=dev"]
+# `npm install` (not `npm ci`) so this builds even when no committed
+# package-lock.json is present. Once you've run `npm install` locally and
+# committed the lockfile, switching to `npm ci --include=dev` is safe.
+cmds = ["npm install --no-audit --no-fund --include=dev"]
 
 [phases.build]
+# Prisma client is regenerated here and again by `postinstall`; doing it
+# explicitly avoids races on Railway's nixpacks layer cache.
 cmds = ["npx prisma generate", "npm run build"]
 
 [start]
+# Run migrations against the live DB on every deploy, then start the server.
+# Using `next start` (not standalone) because we set output:"standalone" only
+# to keep the build slim; for runtime we still go through the npm script so
+# PORT and other env vars are honored.
 cmd = "npx prisma migrate deploy && npm run start"
 
 [variables]

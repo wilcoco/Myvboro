@@ -1,19 +1,19 @@
-import { signOut } from "@/auth";
+"use client";
 
-export default function SignOutButton({ label }: { label: string }) {
+import { useRouter } from "next/navigation";
+
+export default function SignOutButton() {
+  const router = useRouter();
   return (
-    <form
-      action={async () => {
-        "use server";
-        await signOut({ redirectTo: "/" });
+    <button
+      onClick={async () => {
+        await fetch("/api/auth/signout", { method: "POST" });
+        router.push("/");
+        router.refresh();
       }}
+      className="rounded-md border border-border px-3 py-1.5 text-sm text-muted hover:text-text"
     >
-      <button
-        type="submit"
-        className="text-sm text-muted-foreground hover:text-foreground"
-      >
-        {label}
-      </button>
-    </form>
+      로그아웃
+    </button>
   );
 }

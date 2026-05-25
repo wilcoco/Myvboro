@@ -1,41 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import maplibregl, { Map as MLMap, Marker } from "maplibre-gl";
+import maplibregl, { Map as MLMap, GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Locate, Plus } from "lucide-react";
+import { defaultStyle } from "@/lib/mapStyle";
+import { useRouter } from "next/navigation";
 
-import { Link } from "@/i18n/routing";
-import PlaceDetailSheet from "@/components/PlaceDetailSheet";
-import { buildMapStyle } from "@/lib/mapStyle";
-
-type Labels = {
-  locateMe: string;
-  locating: string;
-  permissionDenied: string;
-  loading: string;
-  addVisit: string;
-  sheet: {
-    loading: string;
-    visits: string;
-    queueUp: string;
-    queued: string;
-    loginToQueue: string;
-    noVisits: string;
-    close: string;
-    suspected: string;
-  };
-};
-
-// Default view = Gangnam (kickoff §8: 한 도시 한 카테고리로 검증 시작).
-const DEFAULT_CENTER: [number, number] = [127.0276, 37.4979];
-const DEFAULT_ZOOM = 13;
-
-const PLACES_SOURCE = "places";
-const PLACES_FILL_LAYER = "places-fill";
-const PLACES_STROKE_LAYER = "places-stroke";
-
-type ApiPlace = {
+type PlaceFeature = {
   id: string;
   primaryName: string;
   category: string | null;
@@ -43,226 +14,137 @@ type ApiPlace = {
   centroidLng: number;
   radiusMeters: number;
   confidence: number;
-  visitCount: number;
-  authoritySum: number;
+  totalInvestment: number;
+  investorCount: number;
 };
 
-function toGeoJson(places: ApiPlace[]): GeoJSON.FeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: places.map((p) => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [p.centroidLng, p.centroidLat] },
-      properties: {
-        id: p.id,
-        name: p.primaryName,
-        radiusMeters: p.radiusMeters,
-        confidence: p.confidence,
-        visitCount: p.visitCount,
-      },
-    })),
-  };
-}
+// Seoul City Hall — sensible default for first load if geolocation denied.
+const DEFAULT_CENTER: [number, number] = [126.9784, 37.5666];
 
-export default function MapCanvas({
-  mapboxToken,
-  labels,
-  isAuthed,
-}: {
-  mapboxToken: string;
-  labels: Labels;
-  isAuthed: boolean;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+export default function MapCanvas() {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
-  const meMarkerRef = useRef<Marker | null>(null);
-  const lastBboxFetch = useRef<number>(0);
+  const router = useRouter();
+  const [loaded, setLoaded] = useState(false);
+  const [count, setCount] = useState(0);
 
-  const [locating, setLocating] = useState(false);
-  const [denied, setDenied] = useState(false);
-  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
-
-  // --- map init ----------------------------------------------------------
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!wrapperRef.current) return;
 
     const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: buildMapStyle(mapboxToken),
+      container: wrapperRef.current,
+      style: defaultStyle(),
       center: DEFAULT_CENTER,
-      zoom: DEFAULT_ZOOM,
-      attributionControl: { compact: true },
+      zoom: 13,
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+    map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
 
     map.on("load", () => {
-      map.addSource(PLACES_SOURCE, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-
-      // Fill: opacity ~ confidence, radius ~ real-world radiusMeters.
+      map.addSource("places", { type: "geojson", data: emptyFC() });
+      // Outer "uncertainty" circle: larger when radius is large (low confidence).
       map.addLayer({
-        id: PLACES_FILL_LAYER,
+        id: "place-radius",
         type: "circle",
-        source: PLACES_SOURCE,
+        source: "places",
         paint: {
-          "circle-color": "#16a34a",
-          "circle-opacity": [
-            "interpolate",
-            ["linear"],
-            ["get", "confidence"],
-            0,
-            0.15,
-            1,
-            0.55,
-          ],
           "circle-radius": [
             "interpolate",
             ["exponential", 2],
             ["zoom"],
-            10,
-            ["max", 4, ["/", ["get", "radiusMeters"], 30]],
-            18,
-            ["max", 8, ["*", ["get", "radiusMeters"], 1.5]],
+            10, ["/", ["get", "radiusMeters"], 50],
+            18, ["/", ["get", "radiusMeters"], 0.6],
           ],
-          "circle-stroke-color": "#16a34a",
-          "circle-stroke-opacity": 0.7,
+          "circle-color": "#10b981",
+          "circle-opacity": ["interpolate", ["linear"], ["get", "confidence"], 0, 0.05, 1, 0.25],
+          "circle-stroke-color": "#10b981",
           "circle-stroke-width": 1,
+          "circle-stroke-opacity": 0.6,
         },
       });
-
-      // Center dot — easy click target, intensity = visitCount.
+      // Inner "centroid" dot scaled by investment.
       map.addLayer({
-        id: PLACES_STROKE_LAYER,
+        id: "place-center",
         type: "circle",
-        source: PLACES_SOURCE,
+        source: "places",
         paint: {
-          "circle-color": "#16a34a",
           "circle-radius": [
             "interpolate",
             ["linear"],
-            ["get", "visitCount"],
-            0,
-            3,
-            5,
-            5,
-            20,
-            7,
+            ["get", "totalInvestment"],
+            0, 4,
+            100, 6,
+            1000, 10,
+            10000, 16,
           ],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
+          "circle-color": "#fafafa",
+          "circle-stroke-color": "#0a0a0a",
+          "circle-stroke-width": 1,
         },
       });
+      setLoaded(true);
 
-      map.on("click", PLACES_STROKE_LAYER, (e) => {
-        const id = e.features?.[0]?.properties?.id as string | undefined;
-        if (id) setSelectedPlaceId(id);
+      map.on("click", "place-center", (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const id = f.properties?.id as string | undefined;
+        if (id) router.push(`/places/${id}`);
       });
-      map.on("click", PLACES_FILL_LAYER, (e) => {
-        const id = e.features?.[0]?.properties?.id as string | undefined;
-        if (id) setSelectedPlaceId(id);
-      });
-      const onEnter = () => (map.getCanvas().style.cursor = "pointer");
-      const onLeave = () => (map.getCanvas().style.cursor = "");
-      map.on("mouseenter", PLACES_STROKE_LAYER, onEnter);
-      map.on("mouseleave", PLACES_STROKE_LAYER, onLeave);
-
-      void refreshPlaces();
+      map.on("mouseenter", "place-center", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "place-center", () => (map.getCanvas().style.cursor = ""));
     });
 
-    map.on("moveend", () => void refreshPlaces());
+    map.on("moveend", () => loadInBbox(map));
 
-    mapRef.current = map;
+    // Try to recenter on user location once.
+    navigator.geolocation?.getCurrentPosition(
+      (pos) => map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15 }),
+      () => undefined,
+      { enableHighAccuracy: true, timeout: 5000 },
+    );
+
     return () => {
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapboxToken]);
+  }, []);
 
-  // --- bbox fetch (throttled) -------------------------------------------
-  async function refreshPlaces() {
-    const map = mapRef.current;
-    if (!map) return;
-    const now = Date.now();
-    if (now - lastBboxFetch.current < 300) return;
-    lastBboxFetch.current = now;
+  useEffect(() => {
+    if (loaded && mapRef.current) loadInBbox(mapRef.current).then(setCount);
+  }, [loaded]);
 
+  async function loadInBbox(map: MLMap): Promise<number> {
     const b = map.getBounds();
     const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-    const res = await fetch(`/api/places?bbox=${bbox}`).catch(() => null);
-    if (!res?.ok) return;
-    const { places } = (await res.json()) as { places: ApiPlace[] };
-    const source = map.getSource(PLACES_SOURCE) as maplibregl.GeoJSONSource | undefined;
-    source?.setData(toGeoJson(places));
+    const res = await fetch(`/api/places?bbox=${bbox}`);
+    if (!res.ok) return 0;
+    const data = (await res.json()) as { ok: boolean; places?: PlaceFeature[] };
+    const places = data.places ?? [];
+    const src = map.getSource("places") as GeoJSONSource | undefined;
+    src?.setData({
+      type: "FeatureCollection",
+      features: places.map((p) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.centroidLng, p.centroidLat] },
+        properties: { ...p },
+      })),
+    });
+    setCount(places.length);
+    return places.length;
   }
 
-  const locateMe = () => {
-    if (!navigator.geolocation || !mapRef.current) return;
-    setLocating(true);
-    setDenied(false);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocating(false);
-        const lngLat: [number, number] = [pos.coords.longitude, pos.coords.latitude];
-        mapRef.current?.flyTo({ center: lngLat, zoom: 15, essential: true });
-
-        if (meMarkerRef.current) {
-          meMarkerRef.current.setLngLat(lngLat);
-        } else {
-          const el = document.createElement("div");
-          el.className = "w-4 h-4 rounded-full bg-blue-500 ring-4 ring-blue-500/30 shadow-lg";
-          meMarkerRef.current = new maplibregl.Marker({ element: el })
-            .setLngLat(lngLat)
-            .addTo(mapRef.current!);
-        }
-      },
-      () => {
-        setLocating(false);
-        setDenied(true);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
-    );
-  };
-
   return (
-    <div className="absolute inset-0">
-      <div ref={containerRef} className="absolute inset-0" />
-
-      <Link
-        href="/add"
-        className="absolute bottom-24 right-4 z-10 inline-flex items-center gap-2 rounded-full bg-primary text-primary-foreground shadow-lg px-5 py-3 hover:opacity-90 transition"
-      >
-        <Plus className="h-4 w-4" />
-        <span className="text-sm font-medium">{labels.addVisit}</span>
-      </Link>
-
-      <button
-        type="button"
-        onClick={locateMe}
-        disabled={locating}
-        aria-label={labels.locateMe}
-        className="absolute bottom-6 right-4 z-10 flex items-center gap-2 rounded-full bg-card text-card-foreground border shadow-lg px-4 py-3 hover:bg-accent transition disabled:opacity-60"
-      >
-        <Locate className="h-4 w-4" />
-        <span className="text-sm font-medium">
-          {locating ? labels.locating : labels.locateMe}
-        </span>
-      </button>
-
-      {denied && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 rounded-full bg-destructive text-destructive-foreground text-sm px-4 py-2 shadow">
-          {labels.permissionDenied}
-        </div>
-      )}
-
-      <PlaceDetailSheet
-        placeId={selectedPlaceId}
-        isAuthed={isAuthed}
-        labels={labels.sheet}
-        onClose={() => setSelectedPlaceId(null)}
-      />
+    <div className="relative h-full w-full">
+      <div ref={wrapperRef} className="absolute inset-0" />
+      <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-surface/90 px-3 py-1 text-xs text-muted backdrop-blur">
+        {count} places in view
+      </div>
     </div>
   );
+}
+
+function emptyFC(): GeoJSON.FeatureCollection {
+  return { type: "FeatureCollection", features: [] };
 }
