@@ -14,7 +14,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="ko">
       <body className="flex h-[100dvh] flex-col bg-bg text-text">
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
+        <header className="flex h-14 items-center justify-between border-b border-border px-4">
           <Link href="/" className="font-semibold tracking-tight">
             myvboro
           </Link>

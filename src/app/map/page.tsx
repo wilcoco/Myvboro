@@ -3,10 +3,11 @@ import MapCanvas from "@/components/MapCanvas";
 export const dynamic = "force-dynamic";
 
 export default function MapPage() {
-  // Map fills the entire <main>. Inside a flex column body, main is
-  // flex-1 + min-h-0, so this h-full resolves cleanly.
+  // Anchor against the viewport, not the flex chain. The h-14 header is
+  // in layout.tsx; this fills everything below it. Bypasses the "percent
+  // heights inside flex-1" gotcha that left the container at 0×0.
   return (
-    <div className="h-full w-full">
+    <div className="fixed inset-x-0 bottom-0 top-14">
       <MapCanvas />
     </div>
   );
