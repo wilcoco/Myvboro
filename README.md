@@ -33,8 +33,8 @@
 | Styling      | Tailwind CSS                                       |
 | Map          | MapLibre GL JS + Mapbox raster tiles (OSM fallback)|
 | Auth         | Phone OTP (mock SMS by default; rotates to Twilio/Aligo) |
-| DB           | PostgreSQL + PostGIS (`geography(POINT, 4326)`)    |
-| ORM          | Prisma (PostGIS via raw SQL migrations)            |
+| DB           | PostgreSQL (plain — no PostGIS dep)                |
+| ORM          | Prisma; spatial queries via haversine in raw SQL   |
 | Storage      | Cloudflare R2 (optional in dev)                    |
 | Deploy       | Railway (nixpacks)                                 |
 
@@ -116,17 +116,20 @@ src/
 prisma/
 ├─ schema.prisma
 └─ migrations/
-   ├─ 0_postgis/                # CREATE EXTENSION postgis
-   ├─ 1_init/                   # base tables, indexes, FKs
-   └─ 2_postgis_columns/        # ALTER ADD COLUMN geography + GIST + sync triggers
+   └─ 1_init/                   # base tables, indexes, FKs (no PostGIS)
 ```
+
+Spatial queries (`findNearbyPlaces`, `findPlacesInBbox`) use a bounding-box
+pre-filter on `(centroidLat, centroidLng)` + haversine in raw SQL. See
+`src/lib/places.ts`. Fast enough for ~100k places per region; swap in
+PostGIS or S2/H3 later if needed.
 
 ---
 
 ## Deployment (Railway)
 
 1. **Provision Postgres** (Railway → `+ New` → Database → PostgreSQL).
-   PostGIS is enabled by the first migration (`CREATE EXTENSION postgis`).
+   Plain Postgres — no PostGIS required.
 2. **Add this repo as a service.** Railway picks up `nixpacks.toml` and
    `railway.json` automatically.
 3. **Set env vars** in the Railway service:

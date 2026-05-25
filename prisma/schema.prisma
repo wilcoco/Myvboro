@@ -1,20 +1,18 @@
 // myvboro — Prisma schema
 //
-// PostGIS geography columns are added via a raw SQL migration
-// (prisma/migrations/0_postgis/migration.sql). Prisma's migration engine
-// doesn't understand `geography(POINT, 4326)`, so those columns are
-// declared as `Unsupported(...)` and operated on with raw queries / PostGIS
-// functions in src/lib/places.ts.
+// Plain Postgres (no PostGIS dependency). Spatial queries use a bounding-
+// box pre-filter on (centroidLat, centroidLng) + a haversine distance
+// formula. See src/lib/places.ts. This is fast enough for MVP scale
+// (< 100k places per region); PostGIS can be reintroduced later if
+// needed.
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [postgis]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -125,11 +123,10 @@ model Place {
   aliases             Json     @default("[]") // [{ name, count, lang }]
   category            String?  // free-form for MVP
 
-  // Centroid is the numeric duplicate of `location` for fast reads/sorting.
-  // `location` is added by the postgis migration as geography(POINT, 4326).
+  // Centroid coordinates. Queries against these go through a bounding-box
+  // pre-filter + haversine in lib/places.ts (no PostGIS).
   centroidLat         Float
   centroidLng         Float
-  location            Unsupported("geography(POINT, 4326)")?
 
   // Emergent uncertainty / confidence; updated by lib/scoring.recomputePlaceAggregates.
   radiusMeters        Float    @default(80)
@@ -179,7 +176,6 @@ model Visit {
 
   lat           Float
   lng           Float
-  location      Unsupported("geography(POINT, 4326)")?
   gpsAccuracy   Float?
   dwellTimeSec  Int?
 

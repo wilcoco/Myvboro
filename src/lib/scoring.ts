@@ -49,27 +49,21 @@ export function timeDecay(visitedAt: Date, now: Date = new Date()): number {
 // Recompute a place's aggregates from its visits: centroid, radius
 // (clustered visits -> small; scattered -> large), confidence, visit count,
 // authority sum.
+//
+// `spread_m` is the visits' standard deviation projected to meters via the
+// equirectangular approximation around the visit centroid — accurate enough
+// for clusters smaller than a city block, which is the only regime where
+// the value matters (we clamp to [15, 150]).
 export async function recomputePlaceAggregates(placeId: string) {
   await prisma.$executeRaw`
     WITH stats AS (
       SELECT
-        AVG(lat) AS avg_lat,
-        AVG(lng) AS avg_lng,
-        COUNT(*)::int AS n,
-        COALESCE(SUM(weight), 0) AS weight_sum,
-        COALESCE(
-          ST_Distance(
-            ST_SetSRID(ST_MakePoint(AVG(lng), AVG(lat)), 4326)::geography,
-            ST_SetSRID(
-              ST_MakePoint(
-                AVG(lng) + COALESCE(STDDEV(lng), 0),
-                AVG(lat) + COALESCE(STDDEV(lat), 0)
-              ),
-              4326
-            )::geography
-          ),
-          30
-        ) AS spread_m
+        AVG(lat)                       AS avg_lat,
+        AVG(lng)                       AS avg_lng,
+        COUNT(*)::int                  AS n,
+        COALESCE(SUM(weight), 0)       AS weight_sum,
+        COALESCE(STDDEV(lat), 0)       AS sd_lat,
+        COALESCE(STDDEV(lng), 0)       AS sd_lng
       FROM "Visit"
       WHERE "placeId" = ${placeId}
     )
@@ -79,7 +73,12 @@ export async function recomputePlaceAggregates(placeId: string) {
       "centroidLng"  = COALESCE(s.avg_lng, p."centroidLng"),
       "visitCount"   = s.n,
       "authoritySum" = s.weight_sum,
-      "radiusMeters" = GREATEST(15, LEAST(150, s.spread_m)),
+      "radiusMeters" = GREATEST(15, LEAST(150,
+        SQRT(
+          POW(s.sd_lat * 111320, 2) +
+          POW(s.sd_lng * 111320 * COS(RADIANS(s.avg_lat)), 2)
+        )
+      )),
       "confidence"   = LEAST(1.0, GREATEST(0.3, LN(GREATEST(s.n, 1) + 1) / LN(20)))
     FROM stats s
     WHERE p.id = ${placeId}
