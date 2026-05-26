@@ -13,7 +13,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const me = await getCurrentUser();
   return (
     <html lang="ko">
-      <body className="flex h-[100dvh] flex-col bg-bg text-text">
+      <body className="flex h-[100dvh] flex-col bg-bg text-text" suppressHydrationWarning>
         <header className="flex h-14 items-center justify-between border-b border-border px-4">
           <Link href="/" className="font-semibold tracking-tight">
             myvboro
@@ -24,7 +24,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <>
                 <Link href="/places/new" className="text-muted hover:text-text">+ 가게</Link>
                 <Link href="/profile" className="text-muted hover:text-text">
-                  내 정보 · <span className="text-text">{me.points.toLocaleString()}P</span>
+                  내 정보 · <span className="text-text">{me.points.toLocaleString("en-US")}P</span>
                 </Link>
                 <SignOutButton />
               </>

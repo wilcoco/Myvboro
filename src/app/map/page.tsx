@@ -1,4 +1,4 @@
-import MapCanvas from "@/components/MapCanvas";
+import MapCanvasClient from "./MapCanvasClient";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,7 @@ export default function MapPage() {
   // heights inside flex-1" gotcha that left the container at 0×0.
   return (
     <div className="fixed inset-x-0 bottom-0 top-14">
-      <MapCanvas />
+      <MapCanvasClient />
     </div>
   );
 }
