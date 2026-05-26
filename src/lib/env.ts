@@ -16,9 +16,15 @@ function int(name: string, fallback: number): number {
 //   ALLOW_MOCK_SMS_IN_PROD=true
 // Set it explicitly when you're knowingly running prod without real SMS.
 // This is opt-in by name so nobody trips into it.
+//
+// Guard with `typeof window === "undefined"` because env.ts ends up in the
+// client bundle (via mapStyle.ts → MapCanvas) and the client always sees
+// SMS_PROVIDER undefined / NODE_ENV inlined as "production" — without the
+// guard the check would crash the browser, not just the server.
 const rawSmsProvider = process.env.SMS_PROVIDER || "mock";
 const mockAllowedInProd = process.env.ALLOW_MOCK_SMS_IN_PROD === "true";
 if (
+  typeof window === "undefined" &&
   process.env.NODE_ENV === "production" &&
   rawSmsProvider === "mock" &&
   !mockAllowedInProd
