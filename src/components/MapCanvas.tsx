@@ -45,10 +45,13 @@ export default function MapCanvas() {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
     map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
 
-    // Belt-and-suspenders: if the container resized after init (common in
-    // flex layouts), force MapLibre to recompute. Cheap to call.
-    const ro = new ResizeObserver(() => map.resize());
-    ro.observe(wrapperRef.current);
+    // We wire the resize observer + moveend handler only AFTER the style
+    // finishes loading. Otherwise the very first ResizeObserver callback
+    // calls map.resize() before the style is wired, which fires moveend,
+    // which calls loadInBbox(map), which calls map.getSource('places') —
+    // and that explodes with "Cannot read properties of undefined" because
+    // map.style hasn't been assigned yet.
+    let ro: ResizeObserver | null = null;
 
     map.on("load", () => {
       // Trigger one more resize after the style finishes loading; some
@@ -105,9 +108,14 @@ export default function MapCanvas() {
       });
       map.on("mouseenter", "place-center", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "place-center", () => (map.getCanvas().style.cursor = ""));
-    });
 
-    map.on("moveend", () => loadInBbox(map));
+      // Safe to wire these now — places source + layers exist.
+      map.on("moveend", () => loadInBbox(map));
+      if (wrapperRef.current) {
+        ro = new ResizeObserver(() => map.resize());
+        ro.observe(wrapperRef.current);
+      }
+    });
 
     // Try to recenter on user location once.
     navigator.geolocation?.getCurrentPosition(
@@ -117,7 +125,7 @@ export default function MapCanvas() {
     );
 
     return () => {
-      ro.disconnect();
+      ro?.disconnect();
       map.remove();
       mapRef.current = null;
     };
@@ -129,14 +137,23 @@ export default function MapCanvas() {
   }, [loaded]);
 
   async function loadInBbox(map: MLMap): Promise<number> {
+    // Guard against being called before style/sources are wired.
+    // getSource on an unloaded map throws inside MapLibre (style is undef).
+    let src: GeoJSONSource | undefined;
+    try {
+      src = map.getSource("places") as GeoJSONSource | undefined;
+    } catch {
+      return 0;
+    }
+    if (!src) return 0;
+
     const b = map.getBounds();
     const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
     const res = await fetch(`/api/places?bbox=${bbox}`);
     if (!res.ok) return 0;
     const data = (await res.json()) as { ok: boolean; places?: PlaceFeature[] };
     const places = data.places ?? [];
-    const src = map.getSource("places") as GeoJSONSource | undefined;
-    src?.setData({
+    src.setData({
       type: "FeatureCollection",
       features: places.map((p) => ({
         type: "Feature",
