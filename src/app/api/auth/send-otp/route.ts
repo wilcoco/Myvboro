@@ -22,7 +22,12 @@ export async function POST(req: Request) {
   // Dev shortcut: when no real SMS provider is wired, skip OTP entirely
   // and create the session right away. The whole `mock` provider exists
   // for this — don't keep users typing a code that nobody actually sends.
-  if (env.smsProvider === "mock") {
+  //
+  // Belt-and-suspenders: env.ts already refuses to start the app in
+  // production with SMS_PROVIDER=mock, but the explicit NODE_ENV check
+  // here ensures even a misconfigured production binary cannot enter
+  // this branch.
+  if (env.smsProvider === "mock" && process.env.NODE_ENV !== "production") {
     const existing = await prisma.user.findUnique({ where: { phoneNumber: phone } });
     let userId: string;
     if (existing) {

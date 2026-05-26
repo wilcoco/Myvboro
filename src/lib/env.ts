@@ -8,10 +8,21 @@ function int(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// SMS provider must be explicit in production. The mock provider performs
+// auto-signin with no verification (see send-otp route); allowing it as a
+// silent default in prod would mean any unset deploy is an auth-bypass.
+const rawSmsProvider = process.env.SMS_PROVIDER || "mock";
+if (process.env.NODE_ENV === "production" && rawSmsProvider === "mock") {
+  throw new Error(
+    "SMS_PROVIDER is 'mock' in production. Set SMS_PROVIDER=twilio (or aligo) " +
+      "or the auth flow will allow arbitrary phone numbers to sign in.",
+  );
+}
+
 export const env = {
   sessionSecret: process.env.SESSION_SECRET || "dev-secret-change-me-please-32-bytes!!",
   publicAppUrl: process.env.PUBLIC_APP_URL || "http://localhost:3000",
-  smsProvider: (process.env.SMS_PROVIDER || "mock") as "mock" | "twilio" | "aligo",
+  smsProvider: rawSmsProvider as "mock" | "twilio" | "aligo",
 
   signupPointsGrant: int("SIGNUP_POINTS_GRANT", 1000),
   dailyPointsGrant: int("DAILY_POINTS_GRANT", 50),

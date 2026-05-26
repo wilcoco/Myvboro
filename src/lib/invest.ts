@@ -77,6 +77,19 @@ export async function investInPlace(opts: {
   // The whole bookkeeping has to be atomic.
   try {
     const result = await prisma.$transaction(async (tx) => {
+      // Serialize concurrent investments on the same place.
+      //
+      // Under Prisma's default READ COMMITTED isolation, two transactions
+      // doing `findUnique` on the same Place row would both see the same
+      // `totalInvestment`, both compute dividends against that snapshot,
+      // and both write back absolute values — the second commit would
+      // overwrite the first's increment, dropping its principal from the
+      // pool. SELECT ... FOR UPDATE acquires a row-level lock that other
+      // invest transactions on this place wait on until we commit, so the
+      // "pool before me" snapshot the dividend math depends on is the
+      // real, current pool.
+      await tx.$queryRaw`SELECT id FROM "Place" WHERE id = ${placeId} FOR UPDATE`;
+
       const place = await tx.place.findUnique({
         where: { id: placeId },
         select: { id: true, totalInvestment: true, investorCount: true, mergedIntoId: true },
@@ -176,11 +189,15 @@ export async function investInPlace(opts: {
         _sum: { amount: true },
       });
 
+      // Atomic increments — even with the FOR UPDATE lock above, writing
+      // absolute values from a JS-side snapshot is the wrong shape for a
+      // counter. Increments keep the row well-typed for any future code
+      // path that doesn't take the lock.
       await tx.place.update({
         where: { id: placeId },
         data: {
-          totalInvestment: poolBefore + amount,
-          investorCount: place.investorCount + (isNewInvestor ? 1 : 0),
+          totalInvestment: { increment: amount },
+          investorCount: { increment: isNewInvestor ? 1 : 0 },
           recentInvestSum: recentAgg._sum.amount ?? amount,
           recentInvestUpdatedAt: new Date(),
         },
