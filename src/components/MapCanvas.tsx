@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { Map as MLMap, GeoJSONSource } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+// NOTE: maplibre-gl.css is imported from MapCanvasClient.tsx (the static
+// entry point) instead of here, so the stylesheet ships in the page CSS
+// bundle rather than getting bundled into the lazy chunk. Without it
+// MapLibre's canvas inherits no sizing and the map looks invisible even
+// though tile fetches are succeeding.
 import { defaultStyle } from "@/lib/mapStyle";
 import { useRouter } from "next/navigation";
 

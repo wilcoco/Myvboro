@@ -1,6 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
+// Static import of the MapLibre stylesheet. Keeping this in the lazy
+// chunk made the CSS load after the canvas mounted, which is what was
+// turning the map invisible (tiles 200'd, canvas inherited no size).
+import "maplibre-gl/dist/maplibre-gl.css";
 
 // SSR-skip: MapLibre touches window/navigator/document at module load and
 // at runtime, and the initial server-rendered HTML doesn't match what the
