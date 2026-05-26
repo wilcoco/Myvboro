@@ -167,7 +167,15 @@ export default function MapCanvas() {
 
   return (
     <div className="relative h-full w-full">
-      <div ref={wrapperRef} className="absolute inset-0" />
+      {/*
+       * `h-full w-full` (NOT `absolute inset-0`) because MapLibre adds the
+       * .maplibregl-map class to this element, and maplibre-gl.css's
+       * `.maplibregl-map { position: relative }` overrides our `absolute`,
+       * which then leaves `inset-0` non-effectual on a no-content div and
+       * collapses height to 0. With h-full/w-full, the (overridden)
+       * position: relative doesn't matter — sizing still works.
+       */}
+      <div ref={wrapperRef} className="h-full w-full" />
       <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-surface/90 px-3 py-1 text-xs text-muted backdrop-blur">
         {count} places in view
       </div>
