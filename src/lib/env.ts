@@ -11,11 +11,22 @@ function int(name: string, fallback: number): number {
 // SMS provider must be explicit in production. The mock provider performs
 // auto-signin with no verification (see send-otp route); allowing it as a
 // silent default in prod would mean any unset deploy is an auth-bypass.
+//
+// Escape hatch for staging / single-tester demo deploys:
+//   ALLOW_MOCK_SMS_IN_PROD=true
+// Set it explicitly when you're knowingly running prod without real SMS.
+// This is opt-in by name so nobody trips into it.
 const rawSmsProvider = process.env.SMS_PROVIDER || "mock";
-if (process.env.NODE_ENV === "production" && rawSmsProvider === "mock") {
+const mockAllowedInProd = process.env.ALLOW_MOCK_SMS_IN_PROD === "true";
+if (
+  process.env.NODE_ENV === "production" &&
+  rawSmsProvider === "mock" &&
+  !mockAllowedInProd
+) {
   throw new Error(
-    "SMS_PROVIDER is 'mock' in production. Set SMS_PROVIDER=twilio (or aligo) " +
-      "or the auth flow will allow arbitrary phone numbers to sign in.",
+    "SMS_PROVIDER is 'mock' in production. Either set SMS_PROVIDER=twilio (or " +
+      "aligo) or, for a staging/demo deploy you're knowingly running without " +
+      "real SMS, set ALLOW_MOCK_SMS_IN_PROD=true.",
   );
 }
 

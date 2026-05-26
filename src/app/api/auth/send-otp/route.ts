@@ -19,15 +19,12 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, error: "INVALID_PHONE" }, { status: 400 });
   }
 
-  // Dev shortcut: when no real SMS provider is wired, skip OTP entirely
-  // and create the session right away. The whole `mock` provider exists
-  // for this — don't keep users typing a code that nobody actually sends.
-  //
-  // Belt-and-suspenders: env.ts already refuses to start the app in
-  // production with SMS_PROVIDER=mock, but the explicit NODE_ENV check
-  // here ensures even a misconfigured production binary cannot enter
-  // this branch.
-  if (env.smsProvider === "mock" && process.env.NODE_ENV !== "production") {
+  // Dev / staging shortcut: when no real SMS provider is wired, skip OTP
+  // entirely and create the session right away. env.ts already refuses to
+  // start the app in production with SMS_PROVIDER=mock unless
+  // ALLOW_MOCK_SMS_IN_PROD=true is set, so reaching this branch in prod is
+  // an explicit operator choice, not an oversight.
+  if (env.smsProvider === "mock") {
     const existing = await prisma.user.findUnique({ where: { phoneNumber: phone } });
     let userId: string;
     if (existing) {
