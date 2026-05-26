@@ -14,7 +14,6 @@ export default async function MapPage({
 
   const t = await getTranslations();
   const session = await auth();
-  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
   return (
     <main className="h-dvh w-dvw flex flex-col">
@@ -32,7 +31,6 @@ export default async function MapPage({
       </header>
       <div className="flex-1 relative">
         <MapCanvas
-          mapboxToken={mapboxToken}
           isAuthed={Boolean(session?.user?.id)}
           labels={{
             locateMe: t("Map.locateMe"),

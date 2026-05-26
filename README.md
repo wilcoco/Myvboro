@@ -20,7 +20,7 @@ proof ladder, endorsement loop, anti-ads by construction).
 | Framework    | Next.js 15 (App Router) + TypeScript               |
 | Styling      | Tailwind CSS + shadcn/ui primitives                |
 | i18n         | `next-intl` — `/en` and `/ko` from day one         |
-| Map          | MapLibre GL JS + Mapbox raster tiles (OSM fallback)|
+| Map          | Custom Canvas renderer pulling OSM raster tiles    |
 | Auth         | Auth.js v5 (Google + Resend magic link)            |
 | DB           | PostgreSQL + PostGIS (`geography(POINT, 4326)`)    |
 | ORM          | Prisma (PostGIS via raw SQL migrations)            |
@@ -45,7 +45,8 @@ cp .env.example .env
 #   - AUTH_SECRET=$(openssl rand -base64 32)
 #   - AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET
 #   - AUTH_RESEND_KEY / AUTH_RESEND_FROM
-#   - NEXT_PUBLIC_MAPBOX_TOKEN (falls back to OSM raster if empty)
+#   - (Map needs no key — OSM raster tiles are pulled directly; not
+#     production-grade per OSM tile usage policy.)
 
 # 3. Database — applies the PostGIS extension + Prisma schema
 npm run db:migrate:dev
@@ -70,7 +71,8 @@ src/
 │  ├─ api/auth/[...nextauth]/route.ts
 │  └─ not-found.tsx
 ├─ components/
-│  └─ MapCanvas.tsx        # client-side MapLibre
+│  ├─ MapCanvas.tsx        # main map shell (OSM-backed)
+│  └─ OSMMap.tsx           # Canvas tile renderer + pan/zoom/circles
 ├─ i18n/
 │  ├─ routing.ts           # locales, navigation helpers
 │  └─ request.ts           # message loader

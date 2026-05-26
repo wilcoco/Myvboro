@@ -50,8 +50,6 @@ export default async function ProfilePage({
 
   if (!user) redirect(`/${locale}/signin`);
 
-  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
-
   return (
     <main className="min-h-dvh px-4 py-6 max-w-md mx-auto space-y-6">
       <header className="flex items-center justify-between">
@@ -96,7 +94,6 @@ export default async function ProfilePage({
           <h2 className="text-sm font-medium mb-2">{t("territoryTitle")}</h2>
           <ProfileVisitsMap
             visits={visits.map((v) => ({ lat: v.lat, lng: v.lng }))}
-            mapboxToken={mapboxToken}
           />
         </section>
       )}

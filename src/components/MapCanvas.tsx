@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import maplibregl, { Map as MLMap, Marker } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import { useCallback, useRef, useState } from "react";
 import { Locate, Plus } from "lucide-react";
 
 import { Link } from "@/i18n/routing";
+import OSMMap, {
+  type MapBbox,
+  type MapCircle,
+  type OSMMapHandle,
+} from "@/components/OSMMap";
 import PlaceDetailSheet from "@/components/PlaceDetailSheet";
-import { buildMapStyle } from "@/lib/mapStyle";
 
 type Labels = {
   locateMe: string;
@@ -28,12 +30,7 @@ type Labels = {
 };
 
 // Default view = Gangnam (kickoff §8: 한 도시 한 카테고리로 검증 시작).
-const DEFAULT_CENTER: [number, number] = [127.0276, 37.4979];
-const DEFAULT_ZOOM = 13;
-
-const PLACES_SOURCE = "places";
-const PLACES_FILL_LAYER = "places-fill";
-const PLACES_STROKE_LAYER = "places-stroke";
+const DEFAULT_VIEW = { center: { lng: 127.0276, lat: 37.4979 }, zoom: 13 };
 
 type ApiPlace = {
   id: string;
@@ -47,176 +44,48 @@ type ApiPlace = {
   authoritySum: number;
 };
 
-function toGeoJson(places: ApiPlace[]): GeoJSON.FeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: places.map((p) => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [p.centroidLng, p.centroidLat] },
-      properties: {
-        id: p.id,
-        name: p.primaryName,
-        radiusMeters: p.radiusMeters,
-        confidence: p.confidence,
-        visitCount: p.visitCount,
-      },
-    })),
-  };
-}
-
 export default function MapCanvas({
-  mapboxToken,
   labels,
   isAuthed,
 }: {
-  mapboxToken: string;
   labels: Labels;
   isAuthed: boolean;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<MLMap | null>(null);
-  const meMarkerRef = useRef<Marker | null>(null);
-  const lastBboxFetch = useRef<number>(0);
+  const mapRef = useRef<OSMMapHandle>(null);
 
+  const [places, setPlaces] = useState<ApiPlace[]>([]);
+  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
+  const [myLocation, setMyLocation] = useState<{ lng: number; lat: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [denied, setDenied] = useState(false);
-  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
 
-  // --- map init ----------------------------------------------------------
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: buildMapStyle(mapboxToken),
-      center: DEFAULT_CENTER,
-      zoom: DEFAULT_ZOOM,
-      attributionControl: { compact: true },
-    });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-
-    map.on("load", () => {
-      map.addSource(PLACES_SOURCE, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-
-      // Fill: opacity ~ confidence, radius ~ real-world radiusMeters.
-      map.addLayer({
-        id: PLACES_FILL_LAYER,
-        type: "circle",
-        source: PLACES_SOURCE,
-        paint: {
-          "circle-color": "#16a34a",
-          "circle-opacity": [
-            "interpolate",
-            ["linear"],
-            ["get", "confidence"],
-            0,
-            0.15,
-            1,
-            0.55,
-          ],
-          "circle-radius": [
-            "interpolate",
-            ["exponential", 2],
-            ["zoom"],
-            10,
-            ["max", 4, ["/", ["get", "radiusMeters"], 30]],
-            18,
-            ["max", 8, ["*", ["get", "radiusMeters"], 1.5]],
-          ],
-          "circle-stroke-color": "#16a34a",
-          "circle-stroke-opacity": 0.7,
-          "circle-stroke-width": 1,
-        },
-      });
-
-      // Center dot — easy click target, intensity = visitCount.
-      map.addLayer({
-        id: PLACES_STROKE_LAYER,
-        type: "circle",
-        source: PLACES_SOURCE,
-        paint: {
-          "circle-color": "#16a34a",
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["get", "visitCount"],
-            0,
-            3,
-            5,
-            5,
-            20,
-            7,
-          ],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
-        },
-      });
-
-      map.on("click", PLACES_STROKE_LAYER, (e) => {
-        const id = e.features?.[0]?.properties?.id as string | undefined;
-        if (id) setSelectedPlaceId(id);
-      });
-      map.on("click", PLACES_FILL_LAYER, (e) => {
-        const id = e.features?.[0]?.properties?.id as string | undefined;
-        if (id) setSelectedPlaceId(id);
-      });
-      const onEnter = () => (map.getCanvas().style.cursor = "pointer");
-      const onLeave = () => (map.getCanvas().style.cursor = "");
-      map.on("mouseenter", PLACES_STROKE_LAYER, onEnter);
-      map.on("mouseleave", PLACES_STROKE_LAYER, onLeave);
-
-      void refreshPlaces();
-    });
-
-    map.on("moveend", () => void refreshPlaces());
-
-    mapRef.current = map;
-    return () => {
-      map.remove();
-      mapRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapboxToken]);
-
-  // --- bbox fetch (throttled) -------------------------------------------
-  async function refreshPlaces() {
-    const map = mapRef.current;
-    if (!map) return;
-    const now = Date.now();
-    if (now - lastBboxFetch.current < 300) return;
-    lastBboxFetch.current = now;
-
-    const b = map.getBounds();
-    const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-    const res = await fetch(`/api/places?bbox=${bbox}`).catch(() => null);
+  const onMoveEnd = useCallback(async (bbox: MapBbox) => {
+    const url = `/api/places?bbox=${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`;
+    const res = await fetch(url).catch(() => null);
     if (!res?.ok) return;
-    const { places } = (await res.json()) as { places: ApiPlace[] };
-    const source = map.getSource(PLACES_SOURCE) as maplibregl.GeoJSONSource | undefined;
-    source?.setData(toGeoJson(places));
-  }
+    const data = (await res.json()) as { places: ApiPlace[] };
+    setPlaces(data.places ?? []);
+  }, []);
 
-  const locateMe = () => {
-    if (!navigator.geolocation || !mapRef.current) return;
+  const circles: MapCircle[] = places.map((p) => ({
+    id: p.id,
+    lng: p.centroidLng,
+    lat: p.centroidLat,
+    radiusMeters: p.radiusMeters,
+    confidence: p.confidence,
+    visitCount: p.visitCount,
+  }));
+
+  function locateMe() {
+    if (!navigator.geolocation) return;
     setLocating(true);
     setDenied(false);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocating(false);
-        const lngLat: [number, number] = [pos.coords.longitude, pos.coords.latitude];
-        mapRef.current?.flyTo({ center: lngLat, zoom: 15, essential: true });
-
-        if (meMarkerRef.current) {
-          meMarkerRef.current.setLngLat(lngLat);
-        } else {
-          const el = document.createElement("div");
-          el.className = "w-4 h-4 rounded-full bg-blue-500 ring-4 ring-blue-500/30 shadow-lg";
-          meMarkerRef.current = new maplibregl.Marker({ element: el })
-            .setLngLat(lngLat)
-            .addTo(mapRef.current!);
-        }
+        const lngLat = { lng: pos.coords.longitude, lat: pos.coords.latitude };
+        setMyLocation(lngLat);
+        mapRef.current?.flyTo(lngLat, 15);
       },
       () => {
         setLocating(false);
@@ -224,11 +93,18 @@ export default function MapCanvas({
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
     );
-  };
+  }
 
   return (
     <div className="absolute inset-0">
-      <div ref={containerRef} className="absolute inset-0" />
+      <OSMMap
+        ref={mapRef}
+        initialView={DEFAULT_VIEW}
+        circles={circles}
+        myLocation={myLocation}
+        onMoveEnd={onMoveEnd}
+        onCircleClick={setSelectedPlaceId}
+      />
 
       <Link
         href="/add"
